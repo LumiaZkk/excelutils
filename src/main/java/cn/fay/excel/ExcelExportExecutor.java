@@ -224,7 +224,7 @@ public class ExcelExportExecutor {
     }
 
     public static String handleDefaultValuePlaceHolder(String defaultValue, Object... args) {
-        assert defaultValue != null && args.length > 2;
+        assert defaultValue != null && args.length >= 2;
         String erDefaultValue = defaultValue;
         Matcher matcher = EVAL_PATTERN.matcher(defaultValue);
         while (matcher.find()) {
