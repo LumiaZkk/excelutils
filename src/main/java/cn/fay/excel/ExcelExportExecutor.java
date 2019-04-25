@@ -93,10 +93,16 @@ public class ExcelExportExecutor {
     }
 
     public static <E> Workbook excelWriter(Workbook workbook, List<E> data, boolean useLastRowValue, int sheetIndex) {
-       return excelWriter(workbook, data, useLastRowValue, sheetIndex, null);
+       return excelWriter(workbook, data, useLastRowValue, sheetIndex, null, null);
     }
 
+    public static <E> Workbook excelWriter(Workbook workbook, List<E> data,Object tail) {
+        return excelWriter(workbook, data, false, 0, null, tail);
+    }
     public static <E> Workbook excelWriter(Workbook workbook, List<E> data, boolean useLastRowValue, int sheetIndex, Class clz) {
+        return excelWriter(workbook, data, useLastRowValue, sheetIndex, clz, null);
+    }
+    public static <E> Workbook excelWriter(Workbook workbook, List<E> data, boolean useLastRowValue, int sheetIndex, Class clz, Object tail) {
         Class clazz = clz;
         if(clazz == null) {
             if (data == null || data.isEmpty()) {
@@ -114,10 +120,61 @@ public class ExcelExportExecutor {
         assert exportFieldDescriptions != null && !exportFieldDescriptions.isEmpty() : "导出时表头数据为空";
         workbook = workbook == null ? new SXSSFWorkbook(100) : workbook;
         assert sheetIndex >= 0 && sheetIndex <= sheetNames.length : String.format("sheet index must >= 0 and <= %s", sheetNames.length);
-        createSheet(workbook, sheetNames[sheetIndex], collect(sheetIndex, exportFieldDescriptions), data, excelExportInfo, useLastRowValue);
+        if(tail == null ){
+            createSheet(workbook, sheetNames[sheetIndex], collect(sheetIndex, exportFieldDescriptions), data, excelExportInfo, useLastRowValue);
+        }else {
+            createSheet(workbook, sheetNames[sheetIndex], collect(sheetIndex, exportFieldDescriptions), data, excelExportInfo, tail);
+        }
         return workbook;
     }
 
+    private static <E> void createSheet(Workbook wb, String sheetName, List<ExportFieldDescription> exportFieldDescriptions, List<E> data, ExcelExportInfo excelExportInfo, Object tail) {
+        createSheet(wb, sheetName, exportFieldDescriptions, data, excelExportInfo, false);
+        Sheet sheet = wb.getSheet(sheetName);
+        int startRowIndex = sheet.getLastRowNum() + 1;
+        CellStyle defaultLastRowCellStyle = excelExportInfo.defaultLastRowCellStyle();
+        // column value
+        if (tail != null) {
+            Row row = sheet.createRow(startRowIndex++);
+            for (int i = 0; i < exportFieldDescriptions.size(); i++) {
+                Object instance = tail;
+                Cell cell = row.createCell(i);
+                ExportFieldDescription exportFieldDescription = exportFieldDescriptions.get(i);
+                CellStyle tempFieldCS = exportFieldDescription.excelExportField.columnValueCellStyle();
+                CellStyle tempCommonCS = defaultLastRowCellStyle;
+                Class<? extends CellStyleHandler> willUseHandleClass = chooseHandleClass(tempFieldCS, tempCommonCS);
+                //字段默认值
+                String defaultValue = exportFieldDescription.excelExportField.defaultValue();
+                //字段值
+                Object value = null;
+                boolean useDefault = false;
+                try {
+                    value = getValueByGetMethod(exportFieldDescription.field.getName(), instance);
+                } catch (Exception e) {
+                    // ignore
+                    e.printStackTrace();
+                }
+                if (value == null) {
+                    value = handleDefaultValuePlaceHolder(handleSelfMagicMethod(defaultValue), cell.getRow().getRowNum(), cell.getColumnIndex());
+                    useDefault = true;
+                }
+                if (exportFieldDescription.transClass != null && !useDefault) {
+                    value = ExcelObjectFactory.build(exportFieldDescription.transClass).trans(value);
+                }
+                cell.setCellType(tempFieldCS.cellType() != CellStyle.Value.Impl.defaultCellStyle().cellType() ? tempFieldCS.cellType() : tempCommonCS.cellType());
+                cell.setCellStyle((org.apache.poi.ss.usermodel.CellStyle) ExcelObjectFactory.build(willUseHandleClass).handle(wb, tempCommonCS, tempFieldCS, row.getRowNum(), i));
+                if (cell.getCellType() == Cell.CELL_TYPE_NUMERIC) {
+                    String val = String.valueOf(value);
+                    cell.setCellValue("".equals(val) ? 0 : Double.valueOf(val));
+                } else if (cell.getCellType() == Cell.CELL_TYPE_FORMULA) {
+                    cell.setCellFormula(String.valueOf(value));
+                } else {
+                    cell.setCellValue(String.valueOf(value));
+                }
+            }
+        }
+
+    }
     private static <E> void createSheet(Workbook wb, String sheetName, List<ExportFieldDescription> exportFieldDescriptions, List<E> data, ExcelExportInfo excelExportInfo, boolean useLastRowValue) {
         assert exportFieldDescriptions != null && !exportFieldDescriptions.isEmpty() : "请完成相关字段的注解填写";
         Sheet sheet = wb.getSheet(sheetName);
